@@ -16,9 +16,14 @@ const camera = new THREE.PerspectiveCamera(
 camera.position.set(3, 2, 5); // Positioned to see the closed card at an angle
 
 const textureLoader = new THREE.TextureLoader();
-const frontTexture = textureLoader.load('../public/BACK HURTED.jpeg');
+const frontTexture = textureLoader.load(
+  '../public/BACK HURTED2.jpeg'
+);
+const frontBackTexture = textureLoader.load(
+  '../public/chosen_undead.png'
+);
 const insideTexture = textureLoader.load(
-  '../public/back restored.jpeg'
+  '../public/spine restored.jpeg'
 );
 
 // Renderer setup
@@ -65,10 +70,24 @@ const cardGroup = new THREE.Group();
 const cardThickness = 0.02;
 
 // Back panel (stays put) - extends to the right from the hinge
+const backCoverGroup = new THREE.Group(); // Separate group for the back cover
 const backPanel = new THREE.Mesh(cardGeometry, insideMaterial);
 backPanel.position.x = cardWidth / 2; // Position so left edge is at origin (hinge)
 backPanel.position.z = -cardThickness / 2; // Back of the card
-cardGroup.add(backPanel);
+backCoverGroup.add(backPanel);
+
+const backCoverBack = new THREE.Mesh(
+  cardGeometry,
+  new THREE.MeshLambertMaterial({
+    color: 0xf5f5dc, // Light beige/white
+    side: THREE.BackSide
+  })
+);
+backCoverBack.position.x = cardWidth / 2;
+backCoverBack.position.z = -cardThickness / 2;
+backCoverGroup.add(backCoverBack);
+
+cardGroup.add(backCoverGroup);
 
 // Front cover - will rotate around the hinge (this is what opens)
 const frontCoverGroup = new THREE.Group(); // Separate group for the front cover
@@ -77,6 +96,21 @@ frontCover.position.x = cardWidth / 2; // Position so left edge is at origin (hi
 frontCover.position.z = cardThickness / 2; // Front of the card
 frontCover.rotation.y = 0; // Start at 0° (closed position, showing front design)
 frontCoverGroup.add(frontCover);
+
+frontBackTexture.wrapS = THREE.RepeatWrapping;
+frontBackTexture.repeat.x = -1;
+// Back of front cover (shows when opened) - plain white for signatures
+const frontCoverBack = new THREE.Mesh(
+  cardGeometry,
+  new THREE.MeshLambertMaterial({
+    // color: 0xf5f5dc, // Light beige/white
+    map: frontBackTexture,
+    side: THREE.BackSide
+  })
+);
+frontCoverBack.position.x = cardWidth / 2;
+frontCoverBack.position.z = cardThickness / 2;
+frontCoverGroup.add(frontCoverBack);
 
 cardGroup.add(frontCoverGroup);
 scene.add(cardGroup);
@@ -156,6 +190,68 @@ animate();
 let signatures = [];
 let signaturePad;
 
+// Create signer list UI
+function createSignerListUI() {
+  const signerListHTML = `
+    <div id="signer-list" style="
+      position: fixed;
+      top: 80px;
+      right: 20px;
+      width: 280px;
+      background: rgba(44, 24, 16, 0.95);
+      border: 2px solid #8B4513;
+      border-radius: 10px;
+      padding: 20px;
+      z-index: 50;
+      max-height: 60vh;
+      overflow-y: auto;
+    ">
+      <h3 style="
+        color: #DAA520;
+        margin: 0 0 15px 0;
+        font-family: serif;
+        font-size: 18px;
+      ">Signatures</h3>
+      <div id="signer-list-content" style="color: #F5F5DC;">
+        <p style="font-style: italic; opacity: 0.7;">No signatures yet</p>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', signerListHTML);
+}
+
+function updateSignerList() {
+  const content = document.getElementById('signer-list');
+
+  if (signatures.length === 0) {
+    content.innerHTML =
+      '<p style="font-style: italic; opacity: 0.7;">No signatures yet</p>';
+    return;
+  }
+
+  const signerHTML = signatures
+    .map(
+      (sig, index) => `
+    <div style="
+      padding: 8px 0;
+      border-bottom: 1px solid #8B4513;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    ">
+      <span style="font-weight: bold;">${sig.name}</span>
+      <small style="opacity: 0.7; font-size: 12px;">
+        ${index % 2 === 0 ? 'Inside' : 'Cover'}
+      </small>
+    </div>
+  `
+    )
+    .join('');
+
+  content.innerHTML = signerHTML;
+}
+
 // Dynamic texture canvases for signatures
 let frontSignatureCanvas;
 let backSignatureCanvas;
@@ -216,28 +312,19 @@ function updateSignatureTextures() {
     return;
   }
 
-  // Draw signatures on appropriate sides
+  // Draw only signatures (no names) on textures
   signatures.forEach((sig, index) => {
     const img = new Image();
     img.onload = () => {
-      // Alternate between back (inside) and front cover
-      const ctx = index % 2 === 0 ? backCtx : frontCtx; // Even = back (inside), Odd = front
+      // Alternate between back (inside) and front cover back
+      const ctx = index % 2 === 0 ? backCtx : frontCtx;
 
       // Position signatures in a grid
       const x = (index % 3) * 150 + 30;
       const y = Math.floor(index / 3) * 120 + 30;
 
-      // Draw signature with semi-transparent background
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
-      ctx.fillRect(x - 5, y - 5, 130, 90);
-
-      // Draw signature (scale down to fit)
+      // Draw signature only (no name or background)
       ctx.drawImage(img, x, y, 120, 60);
-
-      // Draw name below signature
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.9)';
-      ctx.font = 'bold 14px Arial';
-      ctx.fillText(sig.name, x, y + 80);
 
       completedDraws++;
 
@@ -245,8 +332,6 @@ function updateSignatureTextures() {
       if (completedDraws === totalSignatures) {
         frontSignatureTexture.needsUpdate = true;
         backSignatureTexture.needsUpdate = true;
-
-        // Apply signature textures as overlays
         applySignatureOverlays();
       }
     };
@@ -255,37 +340,30 @@ function updateSignatureTextures() {
 }
 
 function applySignatureOverlays() {
-  // For now, we'll create composite textures
-  // In a more advanced version, we could use multiple texture layers
-
-  // Update front cover with signature overlay
+  // Update front cover back (plain surface for signatures)
   if (signatures.some((_, i) => i % 2 === 1)) {
-    // If any odd-indexed signatures (front)
-    const frontCanvas = document.createElement('canvas');
-    const frontCtx = frontCanvas.getContext('2d');
-    frontCanvas.width = 512;
-    frontCanvas.height = 512;
+    // If any odd-indexed signatures (front cover back)
+    const frontBackCanvas = document.createElement('canvas');
+    const frontBackCtx = frontBackCanvas.getContext('2d');
+    frontBackCanvas.width = 512;
+    frontBackCanvas.height = 512;
 
-    // Draw base texture
-    const frontImg = new Image();
-    frontImg.crossOrigin = 'anonymous';
-    frontImg.onload = () => {
-      frontCtx.drawImage(frontImg, 0, 0, 512, 512);
-      // Overlay signatures
-      frontCtx.drawImage(frontSignatureCanvas, 0, 0);
+    // Fill with light beige background
+    frontBackCtx.fillStyle = '#F5F5DC';
+    frontBackCtx.fillRect(0, 0, 512, 512);
 
-      // Create new texture and apply
-      const compositeTexture = new THREE.CanvasTexture(frontCanvas);
-      frontCover.material.map = compositeTexture;
-      frontCover.material.needsUpdate = true;
-    };
-    frontImg.src =
-      frontTexture.image.src || '../public/BACK HURTED.jpeg';
+    // Overlay signatures
+    frontBackCtx.drawImage(frontSignatureCanvas, 0, 0);
+
+    // Create new texture and apply to back of front cover
+    const compositeTexture = new THREE.CanvasTexture(frontBackCanvas);
+    frontCoverBack.material.map = compositeTexture;
+    frontCoverBack.material.needsUpdate = true;
   }
 
   // Update back panel with signature overlay
   if (signatures.some((_, i) => i % 2 === 0)) {
-    // If any even-indexed signatures (back)
+    // If any even-indexed signatures (inside panel)
     const backCanvas = document.createElement('canvas');
     const backCtx = backCanvas.getContext('2d');
     backCanvas.width = 512;
@@ -479,10 +557,10 @@ function saveSignature() {
   // Apply signatures to card
   updateSignatureTextures();
 
-  closeSignatureModal();
+  // Update the signer list
+  updateSignerList();
 
-  // For now, just log the signatures
-  console.log('All signatures:', signatures);
+  closeSignatureModal();
 }
 
 // Initialize signature system
@@ -511,6 +589,7 @@ updateCardMaterials();
 
 // Create signature modal on load
 createSignatureUI();
+createSignerListUI();
 
 // Add sign button (temporary - can be styled better later)
 const signButton = document.createElement('button');
